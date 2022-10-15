@@ -1,0 +1,66 @@
+version: "3.8"
+#########
+# USAGE #
+#########
+# > $env:DOCKER_HOST="ssh://pi@<IPiHole>"
+# > docker secret create pihole_password ...
+# > docker stack deploy --compose-file pihole.yml PIHOLE
+
+secrets:
+  pihole_password:
+    external: true
+
+# More info at https://github.com/pi-hole/docker-pi-hole/ and https://docs.pi-hole.net/
+services:
+  pihole:
+    image: pihole/pihole:2022.04 # later version fail on my PI3B+ w/ buster due to https://github.com/pi-hole/docker-pi-hole/discussions/1021#discussioncomment-2433455
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "67:67/udp"
+      - "80:80/tcp"
+    dns:
+      - 192.168.1.1
+    environment:
+      WEBPASSWORD_FILE: /run/secrets/pihole_password
+      IPv6: 'false'
+      TZ: 'CEST-2'
+      DNSMASQ_LISTENING: 'all'
+    # Recommended but not required (DHCP needs NET_ADMIN)
+    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+    secrets:
+      - pihole_password
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels: [APP=PIHOLE]
+      # service resource management
+      # resources:
+      #  # Hard limit - Docker does not allow to allocate more
+      #  limits:
+      #    cpus: '0.4'
+      #    memory: 512M
+      #  # Soft limit - Docker makes best effort to return to it
+      #  reservations:
+      #    cpus: '0.3'
+      #    memory: 256M
+      # service restart policy
+      restart_policy:
+        condition: on-failure
+        delay: 6s
+        max_attempts: 20
+        window: 120s
+      # service update configuration
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: continue
+        monitor: 60s
+        max_failure_ratio: 0.3
+      ## placement constraint - in this case on 'worker' nodes only
+      # placement:
+      #  constraints: [node.role == worker]
