@@ -2,7 +2,7 @@ version: "3.8"
 #########
 # USAGE #
 #########
-# > $env:DOCKER_HOST="ssh://pi@<IPiHole>"
+# > $env:DOCKER_HOST="ssh://$PiUser@$PiIp"
 # > docker secret create pihole_password ...
 # > docker stack deploy --compose-file pihole.yml PIHOLE
 
@@ -13,7 +13,7 @@ secrets:
 # More info at https://github.com/pi-hole/docker-pi-hole/ and https://docs.pi-hole.net/
 services:
   pihole:
-    image: pihole/pihole:2022.04 # later version fail on my PI3B+ w/ buster due to https://github.com/pi-hole/docker-pi-hole/discussions/1021#discussioncomment-2433455
+    image: pihole/pihole:latest
     ports:
       - "53:53/tcp"
       - "53:53/udp"
