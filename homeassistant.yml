@@ -1,0 +1,33 @@
+version: "3.8"
+#########
+# USAGE #
+#########
+# > docker secret create pihole_password ...
+# > docker stack deploy --compose-file homeassistant.yml HOMEASSISTANT
+
+# More info at https://github.com/pi-hole/docker-pi-hole/ and https://docs.pi-hole.net/
+version: "3.8"
+
+# > docker stack deploy --compose-file homeassistant.yml HOMEASSISTANT
+services:
+  home-assistant:
+    image: "homeassistant/home-assistant:stable"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /home/pi/home-assistant:/config:rw
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+      - NET_RAW
+    ports:
+      - "8123:8123/tcp"
+      - "1400:1400/tcp" # required for sonos
+    deploy:
+      mode: global
+      endpoint_mode: vip
+      labels: [APP=HOMEASSISTANT]
+      restart_policy:
+        condition: on-failure
+        delay: 6s
+        max_attempts: 20
+        window: 120s
