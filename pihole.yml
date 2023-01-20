@@ -41,7 +41,6 @@ services:
       restart_policy:
         condition: on-failure
         delay: 6s
-        max_attempts: 20
         window: 120s
 
   cloudflared:
@@ -58,5 +57,4 @@ services:
       restart_policy:
         condition: on-failure
         delay: 6s
-        max_attempts: 20
         window: 120s
