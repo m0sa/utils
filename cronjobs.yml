@@ -1,0 +1,41 @@
+version: "3.8"
+
+# > docker secret create better_uptime_heartbeat_id ...
+# > docker stack deploy --compose-file cronjobs.yml CRONJOBS
+
+secrets:
+  better_uptime_heartbeat_id:
+    external: true
+
+services:
+  cronjob-runner:
+    image: crazymax/swarm-cronjob
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    environment:
+      - "TZ=Europe/Vienna"
+      - "LOG_LEVEL=info"
+      - "LOG_JSON=false"
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+
+  better-uptime-ping:
+    image: curlimages/curl
+    tmpfs:
+      - /run/secrets
+    secrets:
+      - better_uptime_heartbeat_id
+    # command: "/bin/sh -c 'echo hbid:`cat /run/secrets/better_uptime_heartbeat_id`'"
+    command: "/bin/sh -c 'curl -sSI https://betteruptime.com/api/v1/heartbeat/`cat /run/secrets/better_uptime_heartbeat_id`'"
+    deploy:
+      mode: replicated
+      replicas: 0
+      labels:
+        - "swarm.cronjob.enable=true"
+        - "swarm.cronjob.schedule=*/5 * * * *" # every 5 minutes
+        - "swarm.cronjob.skip-running=false"
+      restart_policy:
+        condition: none
