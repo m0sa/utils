@@ -1,0 +1,116 @@
+# NOTES:
+#  This file has all the contents inlined, so it can be built via a remote DOCKER_HOST, e.g.
+#       HOST> docker context create remote --docker "host=ssh://pi@raspberrypi"
+# USAGE:
+#       HOST> docker network create --attachable kind
+#       HOST> docker compose run kube-tools
+#  CONTAINER> create-cluster.sh
+
+networks:
+  kind:
+    name: kind
+    external: true
+
+services:
+  kube-tools:
+    networks:
+      - kind
+    entrypoint: bash
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/pi/.kube:/root/.kube
+    build:
+      context: .
+      args:
+        - CURL_IMAGE=curlimages/curl:8.4.0
+        - KIND_VERSION=0.20.0
+        - KUBECTL_VERSION=1.28.3
+        - DOCKER_CLI_VERSION=24.0.7
+        - K9S_VERSION=0.28.2
+      dockerfile_inline: |+
+        ARG CURL_IMAGE
+
+        # inlining file contents so this docker-compose can be ran on a remote DOCKER_HOST=
+        # https://www.docker.com/blog/introduction-to-heredocs-in-dockerfiles/
+        FROM scratch AS content-files
+        WORKDIR /tmp/files
+        COPY <<EOF kind-config.yml
+          apiVersion: kind.x-k8s.io/v1alpha4
+          kind: Cluster
+          networking:
+            ipFamily: ipv4
+            apiServerPort: 6443
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+              extraPortMappings:
+                - containerPort: 80
+                  hostPort: 80
+                  protocol: TCP
+                - containerPort: 443
+                  hostPort: 443
+                  protocol: TCP
+            - role: worker
+            - role: worker
+        EOF
+        COPY <<EOF create-cluster.sh
+          #!/bin/bash
+          # kind cluster
+          kind create cluster --config kind-config.yml
+          sed -i -e "s/127.0.0.1/kind-control-plane/g" ~/.kube/config
+          # create ingress controller
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/provider/kind/deploy.yaml
+        EOF
+
+        # stage for fetching docker cli, needed by kind
+        FROM $$CURL_IMAGE AS fetch-docker-cli
+        ARG DOCKER_CLI_VERSION
+        ENV DOCKER_CLI_URL https://download.docker.com/linux/static/stable/aarch64/docker-$${DOCKER_CLI_VERSION}.tgz
+        WORKDIR /tmp/docker
+        RUN curl --output docker-cli.tgz $$DOCKER_CLI_URL
+        RUN mkdir bin && tar zxvf docker-cli.tgz -C /tmp/docker/bin/ docker/docker
+
+        # stage to fetch kind CLI
+        FROM $$CURL_IMAGE AS fetch-kind-cli
+        ARG KIND_VERSION
+        WORKDIR /tmp/kind
+        ENV KIND_URL https://github.com/kubernetes-sigs/kind/releases/download/v$${KIND_VERSION}/kind-linux-arm64
+        RUN curl --compressed --location --output kind-linux-arm64 $$KIND_URL && \
+            curl --compressed --location --output kind-linux-arm64.sha256sum "$$KIND_URL.sha256sum" && \
+            sha256sum -c kind-linux-arm64.sha256sum
+        RUN chmod +x kind-linux-arm64 && mv kind-linux-arm64 kind
+
+        # stage to fetch the kubectl CLI
+        FROM $$CURL_IMAGE AS fetch-kubectl-cli
+        WORKDIR /tmp/kubectl
+        ARG KUBECTL_VERSION
+        ENV KUBECTL_URL https://dl.k8s.io/release/v$${KUBECTL_VERSION}/bin/linux/arm64/kubectl
+        RUN curl --compressed --location --output kubectl $$KUBECTL_URL
+        RUN chmod +x kubectl
+
+        #stage to fetch k9s
+        FROM $$CURL_IMAGE AS fetch-k9s-cli
+        ARG K9S_VERSION
+        WORKDIR /tmp/k9s
+        ENV K9S_URL https://github.com/derailed/k9s/releases/download/v$${K9S_VERSION}/k9s_Linux_arm64.tar.gz
+        RUN curl --compressed --connect-timeout 30 --location --output k9s.tgz $$K9S_URL
+        RUN mkdir bin && tar zxvf k9s.tgz -C /tmp/k9s/bin/
+
+        # main image, with docker and kind CLI
+        FROM alpine:latest
+        WORKDIR /root
+        RUN apk add --no-cache curl openssh bash
+        ENV LOCAL_BIN /usr/local/bin/
+        COPY --from=fetch-docker-cli /tmp/docker/bin/docker/docker $$LOCAL_BIN
+        COPY --from=fetch-kind-cli /tmp/kind/kind $$LOCAL_BIN
+        COPY --from=fetch-kubectl-cli /tmp/kubectl/kubectl $$LOCAL_BIN
+        COPY --from=fetch-k9s-cli /tmp/k9s/bin/k9s $$LOCAL_BIN
+        COPY --from=content-files /tmp/files/* .
+        RUN chmod +x create-cluster.sh
+
+        ENTRYPOINT /bin/bash
